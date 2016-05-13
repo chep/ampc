@@ -1,9 +1,12 @@
 ;;; ampc.el --- Asynchronous Music Player Controller -*- lexical-binding: t -*-
 
-;; Copyright (C) 2011-2012 Free Software Foundation, Inc.
+;; Copyright (C) 2011-2012, 2016 Free Software Foundation, Inc.
 
 ;; Author: Christopher Schmidt <christopher@ch.ristopher.com>
-;; Maintainer: Christopher Schmidt <christopher@ch.ristopher.com>
+;; Comment: On Jan 2016, I couldn't get hold of Christopher Schmidt
+;;   nor could I find ampc anywhere, so I re-instated GNU ELPA's old version
+;;   and marked it as "maintainerless".
+;; Maintainer: cedric.chepied@gmail.com
 ;; Version: 0.2
 ;; Created: 2011-12-06
 ;; Keywords: ampc, mpc, mpd
@@ -31,7 +34,7 @@
 ;;; ** installation
 ;; If you use GNU ELPA, install ampc via M-x package-list-packages RET or
 ;; (package-install 'ampc).  Otherwise, grab the files in this repository and
-;; put the emacs lisp ones somewhere in your load-path or add the directory the
+;; put the Emacs Lisp ones somewhere in your load-path or add the directory the
 ;; files are in to it, e.g.:
 ;;
 ;; (add-to-list 'load-path "~/.emacs.d/ampc")
@@ -319,8 +322,7 @@
 
 ;;; Code:
 ;;; * code
-(eval-when-compile
-  (require 'cl))
+(eval-when-compile (require 'cl-lib))
 (require 'network-stream)
 (require 'avl-tree)
 (require 'fringe)
@@ -659,7 +661,7 @@ modified."
 (defvar ampc-current-playlist-mode-map
   (let ((map (make-sparse-keymap)))
     (suppress-keymap map)
-    (define-key map (kbd "<return>") 'ampc-play-this)
+    (define-key map (kbd "RET") 'ampc-play-this)
     (define-key map (kbd "<down-mouse-2>") 'ampc-mouse-play-this)
     (define-key map (kbd "<mouse-2>") 'ampc-mouse-align-point)
     (define-key map (kbd "<down-mouse-3>") 'ampc-mouse-delete)
@@ -732,13 +734,19 @@ modified."
     (define-key map (kbd "M-p") 'ampc-tagger-previous-line)
     (define-key map [remap move-beginning-of-line]
       'ampc-tagger-move-beginning-of-line)
-    (define-key map (kbd "<tab>") 'ampc-tagger-completion-at-point)
+    (define-key map (kbd "TAB") 'ampc-tagger-completion-at-point)
     map))
 
 (defvar ampc-tagger-dired-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "C-c C-t") 'ampc-tagger-dired)
     map))
+
+(defvar ampc-search-result
+  (list)
+  "Search result. Nil list if none.")
+
+(cl-defstruct ampc-search-tag name value)
 
 ;;; **** menu
 (easy-menu-define nil ampc-mode-map nil
@@ -1839,6 +1847,39 @@ status (%s)"
              ampc-status)
     (ampc-set-dirty nil)))
 
+(defun ampc-start-search ()
+  (interactive)
+  (let ((search (read-from-minibuffer "Keywords: ")))
+    (ampc-send-command 'search nil "any" (ampc-quote search))))
+
+(defun ampc-find-search-tag (song search)
+  "Search for SEARCH in SONG"
+  (catch 'found
+    (cl-loop for tt in song
+             do (when (string= (ampc-search-tag-name tt) search)
+                  (throw 'found (ampc-search-tag-value tt))))
+    ""))
+
+(defun ampc-fill-search ()
+  (with-current-buffer (get-buffer-create "*ampc-search*")
+    (unless tabulated-list-format
+      (setq tabulated-list-format [("Artist" 20 t)
+                                   ("Title" 30 t)
+                                   ("Album" 30 t)
+                                   ("file" 0 nil)])
+      (tabulated-list-mode)
+      (tabulated-list-init-header))
+    (setq tabulated-list-entries (list))
+    (let ((id 0))
+      (cl-loop for song in ampc-search-result
+               do (let ((line (list id (vector (ampc-find-search-tag song "Artist")
+                                               (ampc-find-search-tag song "Title")
+                                               (ampc-find-search-tag song "Album")
+                                               (ampc-find-search-tag song "file")))))
+                    (setq tabulated-list-entries (append tabulated-list-entries (list line)))
+                    (incf id))))
+    (tabulated-list-print t)))
+
 (defun ampc-fill-tag-song ()
   (cl-loop
    with trees = (list (cdr (assoc (ampc-tags) ampc-internal-db)))
@@ -2022,6 +2063,33 @@ ampc supports MPD protocol version 0.15.0 and later")))
 (defun ampc-handle-update ()
   (message "Database update started"))
 
+(defun ampc-handle-search ()
+  (setq ampc-search-result (list))
+  (goto-char (point-min))
+
+  (while (< (point) (point-max))
+    (if (search-forward-regexp (ampc-extract-regexp "file") nil t) ;beginning of result
+        (progn
+          (let ((start (point))
+                end (point))
+            (if (search-forward-regexp (ampc-extract-regexp "file") nil t) ;next result
+                (progn (beginning-of-line)
+                       (setq end (point)))
+              (setq end (point-max)))
+            (let ((tags '("Artist" "Title" "Album" "file"))
+                  (result (list)))
+              (loop for k in tags
+                    do (goto-char start)
+                    (beginning-of-line)
+                    (when (and (search-forward-regexp (ampc-extract-regexp k) nil t)
+                               (<= (point) end))
+                      (setq result (append result (list (make-ampc-search-tag :name k :value (match-string 1)))))))
+              (setq ampc-search-result (append ampc-search-result (list result))))
+            (goto-char end)))
+      (goto-char (point-max))))
+  (ampc-fill-search))
+
+
 (defun ampc-handle-command (status)
   (cond
    ((eq status 'error)
@@ -2057,7 +2125,9 @@ ampc supports MPD protocol version 0.15.0 and later")))
         (listallinfo
          (ampc-handle-listallinfo))
         (outputs
-         (ampc-fill-outputs))))
+         (ampc-fill-outputs))
+        (search
+         (ampc-handle-search))))
     (unless ampc-outstanding-commands
       (ampc-update)))))
 
