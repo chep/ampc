@@ -1932,7 +1932,7 @@ status (%s)"
   (cl-loop until (eobp)
         for subsystem = (buffer-substring (point) (line-end-position))
         do (when (string-match "^changed: \\(.*\\)$" subsystem)
-             (case (intern (match-string 1 subsystem))
+             (cl-case (intern (match-string 1 subsystem))
                (database
                 (setf ampc-internal-db (list (cons (ampc-tags) nil)))
                 (ampc-set-dirty 'tag 'keep-dirty)
@@ -2095,11 +2095,11 @@ ampc supports MPD protocol version 0.15.0 and later")))
    ((eq status 'error)
     (pop ampc-outstanding-commands))
    ((eq status 'running)
-    (case (caar ampc-outstanding-commands)
+    (cl-case (caar ampc-outstanding-commands)
       (listallinfo (ampc-fill-internal-db t))))
    (t
     (let ((command (pop ampc-outstanding-commands)))
-      (case (car command)
+      (cl-case (car command)
         (idle
          (ampc-handle-idle))
         (setup
@@ -3106,7 +3106,7 @@ provide any files, the audio file that is currently played by
 MPD."
   (interactive "P")
   (cl-assert (ampc-in-ampc-p))
-  (case (car ampc-type)
+  (cl-case (car ampc-type)
     (current-playlist
      (save-excursion
        (ampc-with-selection arg
