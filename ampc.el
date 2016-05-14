@@ -879,6 +879,7 @@ modified."
 (defmacro ampc-fill-skeleton (tag &rest body)
   (declare (indent 1) (debug t))
   `(let ((data-buffer (current-buffer)))
+     (ignore data-buffer)               ;Don't warn if `body' doesn't use it.
      (ampc-with-buffer ,tag
        no-se
        (unless (eq ampc-dirty 'keep-dirty)
@@ -1878,11 +1879,6 @@ status (%s)"
              ampc-status)
     (ampc-set-dirty nil)))
 
-(defun ampc-start-search ()
-  (interactive)
-  (let ((search (read-from-minibuffer "Keywords: ")))
-    (ampc-send-command 'search nil "any" (ampc-quote search))))
-
 (defun ampc-find-search-tag (song search)
   "Search for SEARCH in SONG"
   (catch 'found
@@ -2185,12 +2181,12 @@ ampc supports MPD protocol version 0.15.0 and later")))
   (unless properties
     (cl-return-from ampc-set-tab-offsets))
   (set (make-local-variable 'tab-stop-list) nil)
-  (cl-loop for (title . props) in properties
+  (cl-loop for (_title . props) in properties
         for min- = (plist-get props :min)
         do (cl-incf min (or (plist-get props :width) min-))
         (when min-
           (cl-incf optional-padding (- (plist-get props :max) min-))))
-  (cl-loop for (title . props) in properties
+  (cl-loop for (_title . props) in properties
         with offset = 2
         do (push offset tab-stop-list)
         (cl-incf offset (or (plist-get props :width)
