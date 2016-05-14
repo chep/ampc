@@ -1877,7 +1877,7 @@ status (%s)"
                                                (ampc-find-search-tag song "Album")
                                                (ampc-find-search-tag song "file")))))
                     (setq tabulated-list-entries (append tabulated-list-entries (list line)))
-                    (incf id))))
+                    (cl-incf id))))
     (tabulated-list-print t)))
 
 (defun ampc-fill-tag-song ()
@@ -2078,7 +2078,7 @@ ampc supports MPD protocol version 0.15.0 and later")))
               (setq end (point-max)))
             (let ((tags '("Artist" "Title" "Album" "file"))
                   (result (list)))
-              (loop for k in tags
+              (cl-loop for k in tags
                     do (goto-char start)
                     (beginning-of-line)
                     (when (and (search-forward-regexp (ampc-extract-regexp k) nil t)
