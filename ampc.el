@@ -76,11 +76,11 @@
 ;; selected window for its window setup, customise `ampc-use-full-frame' to a
 ;; non-nil value.
 ;;
-;; ampc offers three independent views which expose different parts of the user
+;; ampc offers independent views which expose different parts of the user
 ;; interface.  The current playlist view, the default view at startup, may be
 ;; accessed using the `J' key (that is `S-j').  The playlist view may be
 ;; accessed using the `K' key.  The outputs view may be accessed by pressing
-;; `L'.
+;; `L'. The search view my be accessed using the `F' key (find).
 
 ;;; *** current playlist view
 ;; The playlist view looks like this:
@@ -525,7 +525,11 @@ modified."
          (pl-prop '(:properties (("Title" :min 15 :max 40)
                                  ("Artist" :min 15 :max 40)
                                  ("Album" :min 15 :max 40)
-                                 ("Time" :width 6)))))
+                                 ("Time" :width 6))))
+         (search-view '(1.0 search :properties (("Track" :title "#" :width 4)
+                                                ("Title" :min 15 :max 40)
+                                                ("Artist" :min 15 :max 40)
+                                                ("Album" :min 15 :max 40)))))
     `((tagger
        horizontal
        (0.65 files-list
@@ -569,6 +573,12 @@ modified."
                  (0.4 playlist ,@pl-prop)
                  (1.0 playlists)))
        ,rs_b)
+      (("Search view" . ,(kbd "F"))
+       horizontal
+       (0.4 vertical
+            ,status
+            (1.0 current-playlist ,@pl-prop))
+       ,search-view)
       (("Outputs view" . ,(kbd "L"))
        outputs :properties (("outputname" :title "Name" :min 10 :max 30)
                             ("outputenabled" :title "Enabled" :width 9))))))
@@ -700,6 +710,14 @@ modified."
     (define-key map (kbd "<mouse-3>") 'ampc-mouse-align-point)
     map))
 
+(defvar ampc-search-mode-map
+  (let ((map (make-sparse-keymap)))
+    (suppress-keymap map)
+    (define-key map (kbd "a") 'ampc-add)
+    (define-key map (kbd "<down-mouse-3>") 'ampc-mouse-add)
+    (define-key map (kbd "<mouse-3>") 'ampc-mouse-align-point)
+    map))
+
 (defvar ampc-outputs-mode-map
   (let ((map (make-sparse-keymap)))
     (suppress-keymap map)
@@ -741,10 +759,6 @@ modified."
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "C-c C-t") 'ampc-tagger-dired)
     map))
-
-(defvar ampc-search-result
-  (list)
-  "Search result. Nil list if none.")
 
 (cl-defstruct ampc-search-tag name value)
 
@@ -960,6 +974,7 @@ modified."
             do (goto-char next)))))
 
 (defmacro ampc-iterate-source-output (delimiter bindings pad-data &rest body)
+  "delimiter = what delimit command results in mpd response"
   (declare (indent 2) (debug t))
   `(let ((output-buffer (current-buffer))
          (tags (cl-loop for (tag . props) in
@@ -991,6 +1006,8 @@ modified."
 (define-derived-mode ampc-outputs-mode ampc-item-mode "ampc-o")
 
 (define-derived-mode ampc-tag-song-mode ampc-item-mode "ampc-ts")
+
+(define-derived-mode ampc-search-mode ampc-item-mode "ampc-search")
 
 (define-derived-mode ampc-current-playlist-mode ampc-playlist-mode "ampc-cpl"
   (ampc-highlight-current-song-mode))
@@ -1335,6 +1352,8 @@ status (%s)"
     ((current-playlist playlist outputs))
     (playlists
      (ampc-update-playlist))
+    (search
+     (message "Don't know what to do here"))
     ((song tag)
      (cl-loop
       for w in
@@ -1530,6 +1549,10 @@ status (%s)"
                       (ampc-send-command 'currentsong))
                      (playlists
                       (ampc-send-command 'listplaylists))
+                     (search
+                      (let ((search (read-from-minibuffer "Keywords: ")))
+                        (unless (string= "" search)
+                          (ampc-send-command 'search nil "any" (ampc-quote search)))))
                      (current-playlist
                       (ampc-send-command 'playlistinfo))))))
     (ampc-send-command 'status)
@@ -1559,7 +1582,7 @@ status (%s)"
       props
     (when (and (not keep-prev)
                (eq (caar ampc-outstanding-commands) command)
-               (equal (cddar ampc-outstanding-commands) args))
+               (equal (cl-cddar ampc-outstanding-commands) args))
       (cl-return-from ampc-send-command))
     (unless (or ampc-working-timer discard-working-timer)
       (setf ampc-yield 0
@@ -1860,26 +1883,6 @@ status (%s)"
                   (throw 'found (ampc-search-tag-value tt))))
     ""))
 
-(defun ampc-fill-search ()
-  (with-current-buffer (get-buffer-create "*ampc-search*")
-    (unless tabulated-list-format
-      (setq tabulated-list-format [("Artist" 20 t)
-                                   ("Title" 30 t)
-                                   ("Album" 30 t)
-                                   ("file" 0 nil)])
-      (tabulated-list-mode)
-      (tabulated-list-init-header))
-    (setq tabulated-list-entries (list))
-    (let ((id 0))
-      (cl-loop for song in ampc-search-result
-               do (let ((line (list id (vector (ampc-find-search-tag song "Artist")
-                                               (ampc-find-search-tag song "Title")
-                                               (ampc-find-search-tag song "Album")
-                                               (ampc-find-search-tag song "file")))))
-                    (setq tabulated-list-entries (append tabulated-list-entries (list line)))
-                    (cl-incf id))))
-    (tabulated-list-print t)))
-
 (defun ampc-fill-tag-song ()
   (cl-loop
    with trees = (list (cdr (assoc (ampc-tags) ampc-internal-db)))
@@ -2064,30 +2067,14 @@ ampc supports MPD protocol version 0.15.0 and later")))
   (message "Database update started"))
 
 (defun ampc-handle-search ()
-  (setq ampc-search-result (list))
-  (goto-char (point-min))
-
-  (while (< (point) (point-max))
-    (if (search-forward-regexp (ampc-extract-regexp "file") nil t) ;beginning of result
-        (progn
-          (let ((start (point))
-                end (point))
-            (if (search-forward-regexp (ampc-extract-regexp "file") nil t) ;next result
-                (progn (beginning-of-line)
-                       (setq end (point)))
-              (setq end (point-max)))
-            (let ((tags '("Artist" "Title" "Album" "file"))
-                  (result (list)))
-              (cl-loop for k in tags
-                    do (goto-char start)
-                    (beginning-of-line)
-                    (when (and (search-forward-regexp (ampc-extract-regexp k) nil t)
-                               (<= (point) end))
-                      (setq result (append result (list (make-ampc-search-tag :name k :value (match-string 1)))))))
-              (setq ampc-search-result (append ampc-search-result (list result))))
-            (goto-char end)))
-      (goto-char (point-max))))
-  (ampc-fill-search))
+  (ampc-fill-skeleton 'search
+    (ampc-iterate-source-output
+        "file"
+        (file)
+      (cl-loop for (tag . tag-regexp) in tags
+               collect (ampc-clean-tag tag (ampc-extract tag-regexp)))
+      `(,file)
+      )))
 
 
 (defun ampc-handle-command (status)
@@ -2989,6 +2976,7 @@ selected), use playlist at point rather than the selected one."
         (message "No playlist at point")
       (message "No playlist selected"))))
 
+(require 'dired)               ;Needed to properly compile dired-map-over-marks.
 ;;;###autoload
 (defun ampc-tagger-dired (&optional arg)
   "Start the tagging subsystem on dired's marked files.
