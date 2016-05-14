@@ -760,6 +760,10 @@ modified."
     (define-key map (kbd "C-c C-t") 'ampc-tagger-dired)
     map))
 
+(defvar ampc-search-keywords
+  nil
+  "Ampc last search performed")
+
 (cl-defstruct ampc-search-tag name value)
 
 ;;; **** menu
@@ -1550,9 +1554,13 @@ status (%s)"
                      (playlists
                       (ampc-send-command 'listplaylists))
                      (search
-                      (let ((search (read-from-minibuffer "Keywords: ")))
-                        (unless (string= "" search)
-                          (ampc-send-command 'search nil "any" (ampc-quote search)))))
+                      (if (active-minibuffer-window) ;can't find a better way to check minibuffer
+                          (when ampc-search-keywords
+                            (ampc-send-command 'search nil "any" (ampc-quote ampc-search-keywords)))
+                        (let ((search (read-from-minibuffer "Keywords: ")))
+                          (unless (string= "" search)
+                            (setq ampc-search-keywords search)
+                            (ampc-send-command 'search nil "any" (ampc-quote search))))))
                      (current-playlist
                       (ampc-send-command 'playlistinfo))))))
     (ampc-send-command 'status)
