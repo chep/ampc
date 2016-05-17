@@ -764,8 +764,6 @@ modified."
   nil
   "Ampc last search performed")
 
-(cl-defstruct ampc-search-tag name value)
-
 ;;; **** menu
 (easy-menu-define nil ampc-mode-map nil
   `("ampc"
@@ -1878,14 +1876,6 @@ status (%s)"
                    (insert (ampc-status t (window-width)) "\n")))
              ampc-status)
     (ampc-set-dirty nil)))
-
-(defun ampc-find-search-tag (song search)
-  "Search for SEARCH in SONG"
-  (catch 'found
-    (cl-loop for tt in song
-             do (when (string= (ampc-search-tag-name tt) search)
-                  (throw 'found (ampc-search-tag-value tt))))
-    ""))
 
 (defun ampc-fill-tag-song ()
   (cl-loop
